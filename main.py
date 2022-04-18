@@ -51,7 +51,6 @@ class Config:
     val=True
 
 
-
 def main():
     
     # Load dataset
@@ -103,8 +102,6 @@ def main():
     print("Tokenizer max length: ", Config.max_len)
 
     if Config.train == True:
-        for fold in range(Config.n_fold):
-            train_set = [train["fold"]]
 
         for fold in range(Config.n_fold):
             if fold in Config.train_fold:
