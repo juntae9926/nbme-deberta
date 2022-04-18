@@ -1,0 +1,11 @@
+name: pytorch
+dependencies:
+  - python=3.9
+  - cudatoolkit=11.1
+  - pytorch::pytorch=1.10
+  - pytorch::torchvision
+  - scikit-learn
+  - pandas
+  - pip
+  - tqdm
+  - transformers
