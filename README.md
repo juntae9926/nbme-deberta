@@ -1,4 +1,4 @@
-# Carnegie Mellon Univ - AI for Social goods
+# Carnegie Mellon Univ - AI for Social Good
 
 ## Install Dependencies
 A set of dependencies is listed in environment.yml. You can use conda to create and activate the environment easily.
