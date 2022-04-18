@@ -40,30 +40,3 @@ class TrainDataset(Dataset):
                         label[start_idx:end_idx] = 1
 
         return inputs, label
-
-# class Dataset(Dataset):
-#     def __init__(self, testset, max_len, tokenizer):
-#         self.testset = testset
-#         self.max_len = max_len
-#         self.tokenizer = tokenizer
-#         self.patient_notess = testset["clean_text"].values # pn_history에서 space 제거한 문장들
-#         self.feature_text = testset["feature_text"].values # feature_text에서 space 제거한 문장들
-#         self.char_targets = testset["target"].values.tolilst()
-    
-#     def __len__(self):
-#         return len(self.patient_notess)
-
-#     def __getitem__(self, idx):
-#         patient_notes = self.patient_notess[idx]
-#         feature_text = self.feature_text[idx]
-#         char_target = self.char_targets[idx]
-
-#         encoding = encodings_from_precomputed(feature_text, patient_notes, self.tokenizer.precomputed, self.tokenizer, max_len=self.max_len)
-        
-#         return {
-#             "ids": torch.tensor(encoding["input_ids"], dtype=torch.long),
-#             "token_type_ids": torch.tensor(encoding["token_type_ids"], dtype=torch.long),
-#             "target": torch.tensor([0], dtype=torch.float),
-#             "offsets": np.array(encoding["offset_mapping"]),
-#             "text": patient_notes
-#         }

@@ -3,16 +3,15 @@ import pandas as pd
 from tqdm import tqdm
 import os
 import ast
-import argparse
 
 import torch
-from transformers import AutoTokenizer, AutoConfig, AutoModel
+from transformers import AutoTokenizer
 from transformers import get_linear_schedule_with_warmup, get_cosine_schedule_with_warmup
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import DataLoader
 from torch.optim import Adam, AdamW, SGD
 import torch.nn as nn
 
-from sklearn.model_selection import KFold, StratifiedGroupKFold, GroupKFold
+from sklearn.model_selection import GroupKFold
 
 from data_utils import *
 from model import *
@@ -244,7 +243,6 @@ def main():
                                     "predictions": predictions},
                                     "model/{}_fold{}_best.pth".format(Config.model.replace("/", "-"), fold))
                         print("----- best model saved -----")
-                    
 
 if __name__ == "__main__":
     main()

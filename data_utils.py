@@ -1,6 +1,6 @@
 import re
 import numpy as np
-from transformers import AutoTokenizer, AutoConfig, AutoModel
+from transformers import AutoTokenizer
 import ast
 import itertools
 from sklearn.metrics import f1_score
