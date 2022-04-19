@@ -2,7 +2,7 @@
 
 ## Install Dependencies
 A set of dependencies is listed in environment.yml. You can use conda to create and activate the environment easily.
-- Install torch version appropriate for your cuda version
+- Install appropriate torch version for your cuda version
 
 ```
 conda env create -f environment.yml
