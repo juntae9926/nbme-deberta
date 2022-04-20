@@ -17,7 +17,7 @@ class Network(nn.Module):
         if pretrained == True:
             self.model = AutoModel.from_pretrained(Config.model, config=self.config)
         else:
-            self.model = AutoModel(self.config)
+            self.model = AutoModel.from_config(self.config)
         
         self.fc_dropout = nn.Dropout(Config.fc_dropout)
         self.fc = nn.Linear(self.config.hidden_size, 1)

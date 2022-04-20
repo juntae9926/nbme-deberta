@@ -40,3 +40,19 @@ class TrainDataset(Dataset):
                         label[start_idx:end_idx] = 1
 
         return inputs, label
+
+class TestDataset(Dataset):
+    def __init__(self, Config, merged_dataset):
+        self.config = Config
+        self.feature_text = merged_dataset["feature_text"].values
+        self.patient_notes = merged_dataset["pn_history"].values
+    
+    def __len__(self):
+        return len(self.feature_text)
+
+    def __getitem__(self, item):
+        inputs = self.config.tokenizer(self.patient_notes[item], self.feature_text[item], add_special_tokens=True, max_length=self.config.max_len, padding="max_length", return_offsets_mapping=False)
+        for k, v in inputs.items():
+            inputs[k] = torch.tensor(v, dtype=torch.long)
+        
+        return inputs

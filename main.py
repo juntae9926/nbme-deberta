@@ -3,6 +3,7 @@ import pandas as pd
 from tqdm import tqdm
 import os
 import ast
+import argparse
 
 import torch
 from transformers import AutoTokenizer
@@ -18,9 +19,7 @@ from model import *
 from dataset import *
 import warnings
 warnings.filterwarnings("ignore")
-
 os.environ["TOKENIZERS_PARALLELISM"] = "true"
-device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 class Config:
     apex=True
@@ -47,11 +46,51 @@ class Config:
     seed=42
     n_fold=5
     train_fold=[0, 1, 2, 3, 4]
-    train=True
-    val=True
+    train=False
+    test=True
+
+def inference(Config, model_path, device):
+    # Load test dataset
+    test = pd.read_csv("data/test.csv")
+    submission = pd.read_csv("data/sample_submission.csv")
+    features = pd.read_csv("data/features.csv")
+    featuers = features.loc[27, "feature_text"] = "Last-Pap-smear-1-year-ago"
+    patient_notes = pd.read_csv("data/patient_notes.csv")
+
+    test = test.merge(features, how="left", on=["feature_num", "case_num"])
+    test = test.merge(patient_notes, how="left", on=["pn_num", "case_num"])    
+
+    test_dataset = TestDataset(Config, test)
+    test_loader = DataLoader(test_dataset, batch_size=Config.batch_size, shuffle=False, num_workers=Config.num_workers, pin_memory=True, drop_last=False)
+
+    model = Network(Config, config_file=None, pretrained=False)
+    model.load_state_dict(torch.load(model_path)["model"])
+
+    preds = []
+    predictions = []
+    model.eval()
+    model.to(device)
+    batch_bar = tqdm(test_loader, total=len(test_loader))
+    for inputs in batch_bar:
+        for k, v in inputs.items():
+            inputs[k] = v.to(device)
+        with torch.no_grad():
+            y_preds = model(inputs)
+        preds.append(y_preds.sigmoid().to("cpu").numpy())
+    prediction = np.concatenate(preds)
+    prediction = prediction.reshape((len(test), Config.max_len))
+    char_probs = get_char_probs(test["pn_history"].values, prediction, Config.tokenizer)
+    predictions.append(char_probs)
+    predictions = np.mean(predictions, axis=0)
+
+    # submission
+    results = get_results(predictions)
+    submission["location"] = results
+    submission[["id", "location"]].to_csv("submission.csv", index=False)
 
 
 def main():
+    device = torch.device(args.device if torch.cuda.is_available() else "cpu")
     
     # Load dataset
     train = pd.read_csv("data/train.csv") # [id, case_num, pn_num, feature_num, annotation, location]
@@ -182,7 +221,7 @@ def main():
                         scaler.scale(loss).backward()
                         grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), Config.max_grad_norm)
 
-                        batch_bar.set_postfix(loss="{:.04f}".format(train_losses.avg), grad_norm="{:.04f}".format(grad_norm), lr="{:.08f}".format(scheduler.get_lr()[0]))
+                        batch_bar.set_postfix(loss="{:.06f}".format(train_losses.avg), grad_norm="{:.04f}".format(grad_norm), lr="{:.06f}".format(scheduler.get_lr()[0]))
 
                         if (idx + 1) % Config.gradient_accumulation_steps == 0:
                             scaler.step(optimizer)
@@ -193,10 +232,9 @@ def main():
                                 scheduler.step()
                         batch_bar.update()
                     batch_bar.close()
-
-                    # if idx % Config.print_freq == 0 or idx == (len(train_loader) - 1):
-                    print('Epoch: [{0}][{1}/{2}] ' 'Loss: {loss.val:.4f}({loss.avg:.4f}) ' 'Grad: {grad_norm:.4f}  ' 'LR: {lr:.8f}  '  \
-                        .format(epoch+1, idx, len(train_loader), loss=train_losses, grad_norm=grad_norm, lr=scheduler.get_lr()[0]))
+                
+                    print('Epoch: [{0}/{0}] ' 'Loss: {loss.val:.6f}({loss.avg:.6f}) ' 'Grad: {grad_norm:.4f}  ' 'LR: {lr:.6f}  '  \
+                        .format(fold, epoch+1, loss=train_losses, grad_norm=grad_norm, lr=scheduler.get_lr()[0]))
 
                     # Validation
                     model.eval()
@@ -220,11 +258,10 @@ def main():
                         val_losses.update(loss.item(), Config.batch_size)
                         preds.append(y_preds.sigmoid().to("cpu").numpy())
 
-                        batch_bar.set_postfix(loss="{:.04f}".format(val_losses.avg))
+                        batch_bar.set_postfix(loss="{:.06f}".format(val_losses.avg))
                         batch_bar.update()
                     batch_bar.close()
-                        # if idx % Config.print_freq == 0 or idx == (len(val_loader) - 1):
-                    print('EVAL: [{0}/{1}] ' 'Loss: {loss.val:.4f}({loss.avg:.4f}) '.format(idx, len(val_loader), loss=val_losses))
+                    print('EVAL: [{0}/{0}] ' 'Loss: {0:.6f}({loss.avg:.6f}) '.format(fold, epoch+1,  loss=val_losses))
                         
                     predictions = np.concatenate(preds).reshape((len(val_set), Config.max_len))
 
@@ -233,13 +270,26 @@ def main():
                     results = get_results(char_probs, th=0.5)
                     preds = get_predictions(results)
                     score = get_score(val_labels, preds)
+                    print(f"micro f1 score of spans is {score}")
 
                     if best_score < score:
                         best_score = score
+                        if not os.path.isdir("model"):
+                            os.mkdir("model")
                         torch.save({"model": model.state_dict(),
                                     "predictions": predictions},
-                                    "model/{}_fold{}_best.pth".format(Config.model.replace("/", "-"), fold))
+                                    "model/{}_{:0.2f}.pth".format(Config.model.split("/")[-1], score))
                         print("----- best model saved -----")
 
+    if Config.test == True:  
+
+        inference(Config, args.model_path, args.device)
+
 if __name__ == "__main__":
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--device", default="cuda:1", type=str, help="Select cuda:0 or cuda:1")
+    parser.add_argument("--model_path", default="model/deberta-base_0.76.pth", type=str, help="Select model for inference")
+    args = parser.parse_args()
+
     main()
