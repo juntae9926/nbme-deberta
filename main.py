@@ -39,7 +39,7 @@ def inference(tokenizer, max_len, device):
     model_path = os.listdir("model")
     model_path = model_path.sort(reverse = True)
     model = Network(args.model)
-    model.load_state_dict(torch.load("model/" + model_path)["model"])
+    model.load_state_dict(torch.load("model/" + model_path[0])["model"])
 
     preds = []
     predictions = []
