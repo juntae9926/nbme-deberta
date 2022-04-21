@@ -111,13 +111,13 @@ def main():
         optimizer = AdamW(optimizer_parameters, lr=args.lr, eps=1e-6, betas=(0.9, 0.999))
         #scheduler = CosineAnnealingWarmUpRestarts(optimizer, T_0=10, T_mult=2, eta_max=args.lr,  T_up=150, gamma=args.gamma)
         if args.scheduler == "expon":
-            scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.95)
+            scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=args.gamma)
         elif args.scheduler == "cosin":
             scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=(715 * args.epochs), eta_min=1e-7)
         elif args.scheduler == "cycle":
-            scheduler = torch.optim.lr_scheduler.CyclicLR(optimizer, base_lr=args.lr/2, max_lr=args.lr, step_size_up=50, step_size_down=None, mode='exp_range', gamma=0.995)
+            scheduler = torch.optim.lr_scheduler.CyclicLR(optimizer, base_lr=args.lr/2, max_lr=args.lr, step_size_up=50, step_size_down=None, mode='exp_range', gamma=args.gamma)
         elif args.scheduler == "lambda":
-            scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda epoch: 0.95 ** epoch)
+            scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda epoch: args.gamma ** epoch)
         criterion = nn.BCEWithLogitsLoss(reduction="none")  
 
         for fold in range(args.n_fold):
@@ -238,7 +238,7 @@ if __name__ == "__main__":
     parser.add_argument("--lr", default=2e-5, type=float)
     parser.add_argument("--n-fold", default=5, type=int)
     parser.add_argument("--gradient-accumulation-steps", default=1, type=int)
-    parser.add_argument("--gamma", default=0.5, type=float)
+    parser.add_argument("--gamma", default=0.999, type=float)
     parser.add_argument("--train", default=True, type=bool)
     parser.add_argument("--test", default=True, type=bool)
     parser.add_argument("--wandb", default=True, type=bool)
