@@ -3,8 +3,9 @@ from torch.utils.data import Dataset
 from data_utils import *
 
 class TrainDataset(Dataset):
-    def __init__(self, Config, merged_dataset):
-        self.config = Config
+    def __init__(self, tokenizer, max_len, merged_dataset):
+        self.tokenizer = tokenizer
+        self.max_len = max_len
         self.feature_text = merged_dataset["feature_text"].values
         self.patient_notes = merged_dataset["pn_history"].values
         self.annotation_lengths = merged_dataset["annotation_length"].values
@@ -14,11 +15,11 @@ class TrainDataset(Dataset):
         return len(self.feature_text)
 
     def __getitem__(self, item):
-        inputs = self.config.tokenizer(self.patient_notes[item], self.feature_text[item], add_special_tokens=True, max_length=self.config.max_len, padding="max_length", return_offsets_mapping=False)
+        inputs = self.tokenizer(self.patient_notes[item], self.feature_text[item], add_special_tokens=True, max_length=self.max_len, padding="max_length", return_offsets_mapping=False)
         for k, v in inputs.items():
             inputs[k] = torch.tensor(v, dtype=torch.long)
 
-        encoded = self.config.tokenizer(self.patient_notes[item], add_special_tokens=True, max_length=self.config.max_len, padding="max_length", return_offsets_mapping=True)
+        encoded = self.tokenizer(self.patient_notes[item], add_special_tokens=True, max_length=self.max_len, padding="max_length", return_offsets_mapping=True)
         offset_mapping = encoded['offset_mapping']
         ignore_idxes = np.where(np.array(encoded.sequence_ids()) != 0)[0]
         label = np.zeros(len(offset_mapping))
@@ -42,8 +43,9 @@ class TrainDataset(Dataset):
         return inputs, label
 
 class TestDataset(Dataset):
-    def __init__(self, Config, merged_dataset):
-        self.config = Config
+    def __init__(self, tokenizer, max_len, merged_dataset):
+        self.tokenizer = tokenizer
+        self.max_len = max_len
         self.feature_text = merged_dataset["feature_text"].values
         self.patient_notes = merged_dataset["pn_history"].values
     
@@ -51,7 +53,7 @@ class TestDataset(Dataset):
         return len(self.feature_text)
 
     def __getitem__(self, item):
-        inputs = self.config.tokenizer(self.patient_notes[item], self.feature_text[item], add_special_tokens=True, max_length=self.config.max_len, padding="max_length", return_offsets_mapping=False)
+        inputs = self.tokenizer(self.patient_notes[item], self.feature_text[item], add_special_tokens=True, max_length=self.max_len, padding="max_length", return_offsets_mapping=False)
         for k, v in inputs.items():
             inputs[k] = torch.tensor(v, dtype=torch.long)
         

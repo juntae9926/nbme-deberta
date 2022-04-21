@@ -7,7 +7,6 @@ import argparse
 
 import torch
 from transformers import AutoTokenizer
-from transformers import get_linear_schedule_with_warmup, get_cosine_schedule_with_warmup
 from torch.utils.data import DataLoader
 from torch.optim import Adam, AdamW, SGD
 import torch.nn as nn
@@ -17,54 +16,29 @@ from sklearn.model_selection import GroupKFold
 from data_utils import *
 from model import *
 from dataset import *
+from train_utils import *
+import wandb
 import warnings
 warnings.filterwarnings("ignore")
 os.environ["TOKENIZERS_PARALLELISM"] = "true"
 
-class Config:
-    apex=True
-    print_freq=100
-    num_workers=4
-    #model = "roberta-large"
-    model="microsoft/deberta-base"
-    scheduler='cosine' # ['linear', 'cosine']
-    batch_scheduler=True
-    num_cycles=0.5
-    num_warmup_steps=0
-    epochs=5
-    encoder_lr=2e-5
-    decoder_lr=2e-5
-    min_lr=1e-6
-    eps=1e-6
-    betas=(0.9, 0.999)
-    batch_size=8
-    fc_dropout=0.2
-    max_len=512
-    weight_decay=0.01
-    gradient_accumulation_steps=1
-    max_grad_norm=1000
-    seed=42
-    n_fold=5
-    train_fold=[0, 1, 2, 3, 4]
-    train=False
-    test=True
-
-def inference(Config, model_path, device):
+def inference(tokenizer, max_len, device):
     # Load test dataset
     test = pd.read_csv("data/test.csv")
     submission = pd.read_csv("data/sample_submission.csv")
     features = pd.read_csv("data/features.csv")
-    featuers = features.loc[27, "feature_text"] = "Last-Pap-smear-1-year-ago"
     patient_notes = pd.read_csv("data/patient_notes.csv")
 
     test = test.merge(features, how="left", on=["feature_num", "case_num"])
     test = test.merge(patient_notes, how="left", on=["pn_num", "case_num"])    
 
-    test_dataset = TestDataset(Config, test)
-    test_loader = DataLoader(test_dataset, batch_size=Config.batch_size, shuffle=False, num_workers=Config.num_workers, pin_memory=True, drop_last=False)
+    test_dataset = TestDataset(tokenizer, max_len, test)
+    test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False, num_workers=4, pin_memory=True, drop_last=False)
 
-    model = Network(Config, config_file=None, pretrained=False)
-    model.load_state_dict(torch.load(model_path)["model"])
+    # Load best model
+    model_path = os.listdir("model")[0]
+    model = Network(args.model)
+    model.load_state_dict(torch.load("model/" + model_path)["model"])
 
     preds = []
     predictions = []
@@ -78,15 +52,15 @@ def inference(Config, model_path, device):
             y_preds = model(inputs)
         preds.append(y_preds.sigmoid().to("cpu").numpy())
     prediction = np.concatenate(preds)
-    prediction = prediction.reshape((len(test), Config.max_len))
-    char_probs = get_char_probs(test["pn_history"].values, prediction, Config.tokenizer)
+    prediction = prediction.reshape((len(test), max_len))
+    char_probs = get_char_probs(test["pn_history"].values, prediction, tokenizer)
     predictions.append(char_probs)
     predictions = np.mean(predictions, axis=0)
 
-    # submission
+    # Submission
     results = get_results(predictions)
     submission["location"] = results
-    submission[["id", "location"]].to_csv("submission.csv", index=False)
+    submission[["id", "location"]].to_csv("submission_{}.csv".format(model_path), index=False)
 
 
 def main():
@@ -111,39 +85,27 @@ def main():
     train["clean_text"] = train["pn_history"].apply(clean_spaces)
     train["target"] = ""
 
+    train = hard_processing(train)
+    train.to_csv("dataset.csv")
+
     # Split dataset
-    Fold = GroupKFold(n_splits=Config.n_fold)
+    Fold = GroupKFold(n_splits=args.n_fold)
     groups = train["pn_num"].values
     for n, (train_idx, val_idx) in enumerate(Fold.split(train, train["location"], groups)):
         train.loc[val_idx, "fold"] = int(n)
     train["fold"] = train["fold"].astype(int)
     
     # Tokenizer
-    tokenizer = AutoTokenizer.from_pretrained(Config.model)
+    tokenizer = AutoTokenizer.from_pretrained(args.model)
     tokenizer.save_pretrained("tokenizer")
-    Config.tokenizer = tokenizer
+    max_len = get_max_length(tokenizer, patient_notes, features)
 
-    ## Define max length
-    # for i in ["pn_history"]:
-    #     pn_history_lengths = []
-    #     tk0 = tqdm(patient_notes[i].fillna("").values, total=len(patient_notes))
-    #     for text in tk0:
-    #         length = len(tokenizer(text, add_special_tokens=False)["input_ids"])
-    #         pn_history_lengths.append(length)
-    # for j in ["feature_text"]:
-    #     feature_lengths = []
-    #     tk0 = tqdm(features[j].fillna("").values, total=len(features))
-    #     for text in tk0:
-    #         length = len(tokenizer(text, add_special_tokens=False)["input_ids"])
-    #         feature_lengths.append(length)
-    # Config.max_len = max(pn_history_lengths) + max(feature_lengths) + 3 # <cls>, <sep>, <sep>
-    Config.max_len = 466
-    print("Tokenizer max length: ", Config.max_len)
+    if args.train == True:
+        best_score = 0
 
-    if Config.train == True:
-
-        for fold in range(Config.n_fold):
-            if fold in Config.train_fold:
+        for fold in range(args.n_fold):
+            print(f" {fold}_fold -> Validation")
+            if fold in [i for i in range(args.n_fold)]:
 
                 train_set = train[train["fold"] != fold].reset_index(drop=True)
                 val_set = train[train["fold"] == fold].reset_index(drop=True)
@@ -151,56 +113,27 @@ def main():
                 val_pn_history = val_set["pn_history"].values
                 val_labels = create_labels_for_scoring(val_set)
 
-                train_dataset = TrainDataset(Config, train_set)
-                val_dataset = TrainDataset(Config, val_set)
+                train_dataset = TrainDataset(tokenizer, max_len, train_set)
+                val_dataset = TrainDataset(tokenizer, max_len, val_set)
 
-                train_loader = DataLoader(train_dataset, batch_size=Config.batch_size, shuffle=True, num_workers=1, pin_memory=True, drop_last=True)
-                val_loader = DataLoader(val_dataset, batch_size=Config.batch_size, shuffle=False, num_workers=1, pin_memory=True)
+                train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=1, pin_memory=True, drop_last=True)
+                val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False, num_workers=1, pin_memory=True)
 
-                model = Network(Config, config_file=None, pretrained=True)
+                model = Network(args.model)
                 torch.save(model.config, "model_config.pth")
                 model.to(device)
-
-                def get_optimizer_params(model, encoder_lr, decoder_lr, weight_decay=0.0):
-                    param_optimizer = list(model.named_parameters())
-                    no_decay = ["bias", "LayerNorm.bias", "LayerNorm.weight"]
-                    optimizer_parameters = [
-                        {'params': [p for n, p in model.model.named_parameters() if not any(nd in n for nd in no_decay)],
-                        'lr': encoder_lr, 'weight_decay': weight_decay},
-                        {'params': [p for n, p in model.model.named_parameters() if any(nd in n for nd in no_decay)],
-                        'lr': encoder_lr, 'weight_decay': 0.0},
-                        {'params': [p for n, p in model.named_parameters() if "model" not in n],
-                        'lr': decoder_lr, 'weight_decay': 0.0}
-                    ]
-                    return optimizer_parameters
                 
-                optimizer_parameters = get_optimizer_params(model, encoder_lr=Config.encoder_lr, decoder_lr=Config.decoder_lr, weight_decay=Config.weight_decay)
-                optimizer = AdamW(optimizer_parameters, lr=Config.encoder_lr, eps=Config.eps, betas=Config.betas)
+                optimizer_parameters = get_optimizer_params(model, encoder_lr=args.lr, decoder_lr=args.lr, weight_decay=0.01)
+                optimizer = AdamW(optimizer_parameters, lr=args.lr, eps=1e-6, betas=(0.9, 0.999))
+                scheduler = CosineAnnealingWarmUpRestarts(optimizer, T_0=150, T_mult=2, eta_max=args.lr,  T_up=10, gamma=0.8)
+                criterion = nn.BCEWithLogitsLoss(reduction="none")               
 
-                def get_scheduler(cfg, optimizer, num_train_steps):
-                    if cfg.scheduler=='linear':
-                        scheduler = get_linear_schedule_with_warmup(
-                            optimizer, num_warmup_steps=cfg.num_warmup_steps, num_training_steps=num_train_steps
-                        )
-                    elif cfg.scheduler=='cosine':
-                        scheduler = get_cosine_schedule_with_warmup(
-                            optimizer, num_warmup_steps=cfg.num_warmup_steps, num_training_steps=num_train_steps, num_cycles=cfg.num_cycles
-                        )
-                    return scheduler
-                
-                num_train_steps = int(len(train_set) / Config.batch_size * Config.epochs)
-                scheduler = get_scheduler(Config, optimizer, num_train_steps)
-
-                criterion = nn.BCEWithLogitsLoss(reduction="none")
-
-                best_score = 0
-
-                for epoch in range(Config.epochs):
+                for epoch in range(args.epochs):
                     
                     # Train
                     model.train()
                     batch_bar = tqdm(total=len(train_loader), dynamic_ncols=True, leave=False, position=0, desc="Train")
-                    scaler = torch.cuda.amp.GradScaler(enabled=Config.apex)
+                    scaler = torch.cuda.amp.GradScaler(enabled=True)
                     train_losses = AverageMeter()
                     global_step = 0
                     for idx, (inputs, labels) in enumerate(train_loader):
@@ -208,33 +141,32 @@ def main():
                             inputs[k] = v.to(device)
                         labels = labels.to(device)
                         
-                        with torch.cuda.amp.autocast(enabled=Config.apex):
+                        with torch.cuda.amp.autocast(enabled=True):
                             y_preds = model(inputs)
-
+                        
                         loss = criterion(y_preds.view(-1, 1), labels.view(-1, 1))
                         loss = torch.masked_select(loss, labels.view(-1, 1) != -1).mean()
+                        if args.gradient_accumulation_steps > 1:
+                            loss = loss/args.gradient_accumulation_steps
 
-                        if Config.gradient_accumulation_steps > 1:
-                            loss = loss/Config.gradient_accumulation_steps
-
-                        train_losses.update(loss.item(), Config.batch_size)
+                        train_losses.update(loss.item(), args.batch_size)
+                        wandb.log({"train loss": train_losses.avg})
                         scaler.scale(loss).backward()
-                        grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), Config.max_grad_norm)
+                        grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1000)
 
-                        batch_bar.set_postfix(loss="{:.06f}".format(train_losses.avg), grad_norm="{:.04f}".format(grad_norm), lr="{:.06f}".format(scheduler.get_lr()[0]))
+                        batch_bar.set_postfix(loss="{:.06f}".format(train_losses.val), grad_norm="{:.04f}".format(grad_norm), lr="{:.07f}".format(scheduler.get_lr()[0]))
 
-                        if (idx + 1) % Config.gradient_accumulation_steps == 0:
+                        if (idx + 1) % args.gradient_accumulation_steps == 0:
                             scaler.step(optimizer)
                             scaler.update()
                             optimizer.zero_grad()
                             global_step += 1
-                            if Config.batch_scheduler:
-                                scheduler.step()
+                            scheduler.step()
                         batch_bar.update()
                     batch_bar.close()
                 
-                    print('Epoch: [{0}/{0}] ' 'Loss: {loss.val:.6f}({loss.avg:.6f}) ' 'Grad: {grad_norm:.4f}  ' 'LR: {lr:.6f}  '  \
-                        .format(fold, epoch+1, loss=train_losses, grad_norm=grad_norm, lr=scheduler.get_lr()[0]))
+                    print("Epoch: [{0}][{1}/{2}] Loss: {loss.val:.6f}({loss.avg:.6f}) Grad: {grad_norm:.4f} LR: {lr:.7f}".format(   \
+                          fold, epoch+1, args.epochs, loss=train_losses, grad_norm=grad_norm, lr=scheduler.get_lr()[0]))
 
                     # Validation
                     model.eval()
@@ -252,25 +184,27 @@ def main():
                         loss = criterion(y_preds.view(-1, 1), labels.view(-1, 1))
                         loss = torch.masked_select(loss, labels.view(-1, 1) != -1).mean()
 
-                        if Config.gradient_accumulation_steps > 1:
-                            loss = loss/Config.gradient_accumulation_steps
+                        if args.gradient_accumulation_steps > 1:
+                            loss = loss/args.gradient_accumulation_steps
 
-                        val_losses.update(loss.item(), Config.batch_size)
+                        val_losses.update(loss.item(), args.batch_size)
+                        wandb.log({"val loss": val_losses.avg})
                         preds.append(y_preds.sigmoid().to("cpu").numpy())
 
-                        batch_bar.set_postfix(loss="{:.06f}".format(val_losses.avg))
+                        batch_bar.set_postfix(loss="{:.06f}".format(val_losses.val))
                         batch_bar.update()
                     batch_bar.close()
-                    print('EVAL: [{0}/{0}] ' 'Loss: {0:.6f}({loss.avg:.6f}) '.format(fold, epoch+1,  loss=val_losses))
+                    print("EVAL: [{0}][{1}/{2}] Loss: {loss.val:.6f}({loss.avg:.6f})".format(fold, epoch+1, args.epochs, loss=val_losses))
                         
-                    predictions = np.concatenate(preds).reshape((len(val_set), Config.max_len))
+                    predictions = np.concatenate(preds).reshape((len(val_set), max_len))
 
                     # Scoring
-                    char_probs = get_char_probs(val_pn_history, predictions, Config.tokenizer)
+                    char_probs = get_char_probs(val_pn_history, predictions, tokenizer)
                     results = get_results(char_probs, th=0.5)
                     preds = get_predictions(results)
                     score = get_score(val_labels, preds)
-                    print(f"micro f1 score of spans is {score}")
+                    wandb.log({"micro f1 score": score})
+                    print(f"micro f1 score is {score}")
 
                     if best_score < score:
                         best_score = score
@@ -278,18 +212,28 @@ def main():
                             os.mkdir("model")
                         torch.save({"model": model.state_dict(),
                                     "predictions": predictions},
-                                    "model/{}_{:0.2f}.pth".format(Config.model.split("/")[-1], score))
+                                    "model/deberta_{:0.2f}.pth".format(score))
                         print("----- best model saved -----")
 
-    if Config.test == True:  
-
-        inference(Config, args.model_path, args.device)
+    if args.test == True:  
+        inference(tokenizer, max_len, args.device)
 
 if __name__ == "__main__":
 
+    wandb.init(project="nbme", entity="juntae9926")
+
     parser = argparse.ArgumentParser()
     parser.add_argument("--device", default="cuda:1", type=str, help="Select cuda:0 or cuda:1")
-    parser.add_argument("--model_path", default="model/deberta-base_0.76.pth", type=str, help="Select model for inference")
+    parser.add_argument("--model", default="microsoft/deberta-base", type=str)
+    parser.add_argument("--batch_size", default=16, type=int)
+    parser.add_argument("--epochs", default=5, type=int)
+    parser.add_argument("--lr", default=2e-5, type=float)
+    parser.add_argument("--n_fold", default=5, type=int)
+    parser.add_argument("--gradient-accumulation-steps", default=1, type=int)
+    parser.add_argument("--train", default=True, type=bool)
+    parser.add_argument("--test", default=True, type=bool)
     args = parser.parse_args()
+
+    wandb.config.update(args)
 
     main()
