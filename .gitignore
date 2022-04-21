@@ -141,3 +141,4 @@ wandb/
 model_config.pth
 submission.csv
 *.ipynb
+dataset.csv
