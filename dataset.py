@@ -16,6 +16,7 @@ class TrainDataset(Dataset):
 
     def __getitem__(self, item):
         inputs = self.tokenizer(self.patient_notes[item], self.feature_text[item], add_special_tokens=True, max_length=self.max_len, padding="max_length", return_offsets_mapping=False)
+        #inputs = self.tokenizer(self.patient_notes[item], self.feature_text[item], add_special_tokens=True, max_length=self.max_len, padding="max_length")
         for k, v in inputs.items():
             inputs[k] = torch.tensor(v, dtype=torch.long)
 

@@ -1,17 +1,17 @@
+import os
 import torch
+import json
 import torch.nn as nn
-import transformers
-from transformers import AutoTokenizer, AutoConfig, AutoModel
+from transformers import GPT2LMHeadModel
 
-class Network(nn.Module):
-    def __init__(self, model_name):
+class BioMegatron(nn.Module):
+    def __init__(self, tokenizer):
         super().__init__()
-        transformers.logging.set_verbosity_error() # warning 무시
 
-        self.config = AutoConfig.from_pretrained(model_name, output_hidden_stats=True)
-        self.model = AutoModel.from_pretrained(model_name)
-        self.fc_dropout = nn.Dropout(0.2)
-        self.fc = nn.Linear(self.config.hidden_size, 1)
+        self.tokenizer = tokenizer
+        self.model = GPT2LMHeadModel.from_pretrained('nvidia/biomegatron')
+        self.model.resize_token_embeddings(len(self.tokenizer))
+        self.fc = nn.Linear(len(self.tokenizer), 1)
         self._init_weights(self.fc)
 
     def _init_weights(self, module):
@@ -34,5 +34,5 @@ class Network(nn.Module):
 
     def forward(self, inputs):
         feature = self.feature(inputs)
-        output = self.fc(self.fc_dropout(feature))
+        output = self.fc(feature)
         return output
