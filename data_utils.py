@@ -1,3 +1,4 @@
+from distutils import text_file
 import re
 import numpy as np
 from transformers import AutoTokenizer
@@ -275,7 +276,31 @@ def process_feature_text(text):
     text = re.sub('I-year', '1-year', text) 
     text = re.sub('-OR-', " or ", text)
     text = re.sub('-', ' ', text)
+    text = re.sub(':', 'is', text)
+    text = re.sub(';', 'and', text)
+    text = re.sub('w/o', 'without', text)
+    text = re.sub('w/', 'with', text)
+    text = re.sub('y/o', 'years old', text)
+    text = re.sub('yo ', ' years old ', text)
+    text = re.sub(' M ', ' male ', text)
+    text = re.sub(' F ', ' female ', text)
+    text = re.sub('c/o', 'care of', text)
+    text = re.sub('neg', 'negative', text)
+    text = re.sub(' hx', ' history', text)
+    text = re.sub('mo ', 'month ', text)
+    text = re.sub(' mos ', 'months', text)
+    text = re.sub('assoc ', 'associated ', text)
+
+    text = re.sub(' SOB ', ' Shortness Of breath ', text)
+    text = re.sub(' LMP ', ' Last Menstrual Period ', text)
+    text = re.sub(' WNL ', 'Within Normal Limit', text)
+    text = re.sub(' CP ', 'Chronic Pancreatitis', text)
+    text = re.sub('RLQ', 'Right Lower Quadrant', text)
+    text = re.sub(' MI ', ' Myocardial Infarction ', text)
+    text = re.sub('abd ', 'abdominal ', text)
+
     return text
+
 
 def clean_spaces(text):
     text = re.sub('\n', ' ', text) # delete space
