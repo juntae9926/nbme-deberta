@@ -9,5 +9,9 @@ conda env create -f environment.yml
 conda activate deberta
 ```
 
-## Deberta
+## model
+- DeBERTa
+- RoBERTa
+- bioBERT
+- biomegatron
 
