@@ -10,5 +10,4 @@ conda activate deberta
 ```
 
 ## Deberta
-- encoder: Bert
-- decoder: GPT-2
+
