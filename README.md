@@ -9,6 +9,9 @@ conda env create -f environment.yml
 conda activate deberta
 ```
 
-## Deberta
-- encoder: Bert
-- decoder: GPT-2
+## model
+- DeBERTa
+- RoBERTa
+- bioBERT
+- biomegatron
+
